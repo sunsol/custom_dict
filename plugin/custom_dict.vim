@@ -1,4 +1,3 @@
-" 
 
 if exists('loaded_custom_dict_plugin')
     finish
@@ -20,7 +19,10 @@ def custom_dict_init():
     import vim
     NOUSEKIND = '_'
     TREEKIND = '>'
-    TREEKIND = '''\u2023'''
+    try:
+        if "1" == vim.eval('strdisplaywidth("\\u2023")'): TREEKIND = '''\u2023'''
+    except:
+        pass
 
     line_re = re.compile(r'''
         ^(?P<level>(?:\+-\*/)+)
@@ -35,13 +37,10 @@ def custom_dict_init():
         return ','.join((func(x) for x in result))
 
     class Node(object):
-        def __init__(self, word, kind, menu, level=0, info=u''):
+        def __init__(self, word, kind, menu=u'', level=0, info=u''):
             self.level = level
             self.word = word
-            self._word = word.encode('unicode_escape').replace('"', '\\"')
-            self.sortkey = word.swapcase()
             self.kind = kind
-            self._kind = kind if kind != '"' else '\\"'
             self.menu = menu
             self.info = info
             self.childs = []
@@ -49,11 +48,27 @@ def custom_dict_init():
             self._s1 = ''
             self._s2 = ''
 
+        def _kind(self):
+            if self.kind == '\\':
+                return '\\\\'
+            if self.kind == '"':
+                return '\\"'
+            return self.kind
+
+        def _tran(self, s):
+            return s.decode('utf-8').encode('unicode_escape').replace('"', '\\"')
+
         def totreestring(self):
             if not self._s1:
-                self._s1 = '{"word":"%s","kind":"%s","menu":"%s","info":"%s","dup":1}' % (
-                    self._word, TREEKIND if self.childs else self._kind, self.menu, self.info)
+                self._s1 = '{"word":"%s","kind":"%s","menu":"%s","info":"%s","dup":1}' % ( 
+                        self._tran(self.word), TREEKIND if self.childs else self._kind(), 
+                        self._tran(self.menu), self._tran(self.info))
             return self._s1
+
+        def add(self, child, connect=False):
+            self.childs.append(child)
+            if connect:
+                child.father = self
 
         def tostring(self):
             if not self._s2:
@@ -61,12 +76,13 @@ def custom_dict_init():
                 s = []
                 while x:
                     if x.kind not in ('', NOUSEKIND):
-                        s.insert(0, x._word)
+                        s.insert(0, x.word)
                     x = x.father
                 s = '.'.join(s)
-                self._s2 = '{"word":"%s","kind":"%s","menu":"%s","info":"%s","dup":1}' % (
-                    self._word, self._kind, s if s else self.menu,
-                    self.menu + '\n' + self.info if s and self.menu else self.info)
+                self._s2 = '{"word":"%s","kind":"%s","menu":"%s","info":"%s","dup":1}' % ( 
+                        self._tran(self.word), self._kind(), 
+                        self._tran(s) if s else self._tran(self.menu), 
+                        self._tran(self.menu + '\n' + self.info) if s and self.menu else self._tran(self.info))
             return self._s2
 
         def search(self, func, getchilds=True):
@@ -74,14 +90,14 @@ def custom_dict_init():
             for x in self.childs:
                 l = func(x)
                 if l and not x.childs:
-                    r.childs.append(x)
+                    r.add(x)
                 elif l and getchilds:
-                    r.childs.append(x)
+                    r.add(x)
                 elif l:
                     c = Node(x.word, x.kind, x.menu, info=x.info)
                     c.father = x.father
                     c.childs = x.search(func, False).childs
-                    r.childs.append(c)
+                    r.add(c)
                 elif x.childs and not l:
                     r.childs.extend(x.search(func, getchilds).childs)
             return r
@@ -118,18 +134,20 @@ def custom_dict_init():
             d = Custom_dict.get(filetype)
             Complete.buffers[bfname] = Complete(d)
             vim.command("let b:custom_dict='%s'" % bfname)
+            if hasattr(d,'setup'): d.setup(Complete.buffers[bfname])
             if d.complete_method == 'free':
                 vim.command(
-                    "inoremap <buffer> <unique> <silent> %s <C-R>=g:Custom_dict_complete_first()<CR>" % d.keys['first'])
+                    "inoremap <buffer> <silent> %s <C-R>=g:Custom_dict_complete_first()<CR>" % d.keys['first'])
             else:
-                vim.command("setlocal completefunc=g:Custom_dict_complete_func")
+                vim.command(
+                    "setlocal completefunc=g:Custom_dict_complete_func")
                 vim.command("let b:custom_dict_status='first'")
             vim.command(
-                "inoremap <buffer> <unique> <silent> %s <C-R>=g:Custom_dict_complete_kind()<CR>" % d.keys['kind'])
+                "inoremap <buffer> <silent> %s <C-R>=g:Custom_dict_complete_kind()<CR>" % d.keys['kind'])
             vim.command(
-                "inoremap <buffer> <unique> <silent> %s <C-R>=g:Custom_dict_complete_up()<CR>" % d.keys['up'])
+                "inoremap <buffer> <silent> %s <C-R>=g:Custom_dict_complete_up()<CR>" % d.keys['up'])
             vim.command(
-                "inoremap <buffer> <unique> <silent> %s <C-R>=g:Custom_dict_complete_down()<CR>" % d.keys['down'])
+                "inoremap <buffer> <silent> %s <C-R>=g:Custom_dict_complete_down()<CR>" % d.keys['down'])
 
         def __init__(self, dictobj):
             self.dict = dictobj
@@ -146,7 +164,9 @@ def custom_dict_init():
             if self.kindno >= len(self.kinds):
                 self.kindno = -1
                 return tostring(self.result, Node.tostring)
-            return tostring(filter(lambda x: x.kind == self.kinds[self.kindno], self.result), Node.tostring)
+            result = filter(lambda x: x.kind == self.kinds[self.kindno], self.result)
+            if len(result)==1: result.append(Node('_______','_'))
+            return tostring(result, Node.tostring)
 
         def getup(self):
             self.kindno = len(self.kinds)
@@ -169,7 +189,8 @@ def custom_dict_init():
             self.level = []
             self.pos, self.result = self.dict.completefunc(self.dict)
             kinds = set([x.kind for x in self.result])
-            if NOUSEKIND in kinds: kinds.remove(NOUSEKIND)
+            if NOUSEKIND in kinds:
+                kinds.remove(NOUSEKIND)
             self.kinds = list(kinds)
             self.kindno = len(self.kinds)
             self.line = Custom_dict.getline(self.pos)
@@ -251,9 +272,12 @@ def custom_dict_init():
         def get(filetype):
             if filetype in Custom_dict.filetypes:
                 return Custom_dict.filetypes[filetype]
-            files = vim.eval("globpath(&runtimepath,'dicts/' . '%s.*')" % filetype)
-            if files: files = files.split('\n')
-            else: files = []
+            files = vim.eval(
+                "globpath(&runtimepath,'dicts/' . '%s.*')" % filetype)
+            if files:
+                files = files.split('\n')
+            else:
+                files = []
             dicts = filter(lambda x: x.endswith('.dict'), files)
             py = filter(lambda x: x.endswith('/%s.py' % filetype), files)
             if py:
@@ -300,6 +324,11 @@ def custom_dict_init():
                         raise Custom_Error('wrong config: complete_method')
                 if hasattr(config, 'map_keys'):
                     cu_dict.keys.update(config.map_keys)
+                if hasattr(config, 'setup'):
+                    if type(config.setup) == type(updatedicts) and config.setup.func_code.co_argcount == 1:
+                        cu_dict.setup = config.setup
+                    else:
+                        raise Custom_Error('wrong config: setup')
             Custom_dict.filetypes[filetype] = cu_dict
             return cu_dict
 
@@ -313,10 +342,6 @@ def custom_dict_init():
             self.nodetree = Node.ROOT()
 
         @staticmethod
-        def vimencode(s):
-            return s.decode('utf-8').encode('unicode_escape').replace('"', '\\"')
-
-        @staticmethod
         def vimdecode(s):
             return s.decode(vim.eval("&enc")).encode('utf-8')
 
@@ -324,9 +349,9 @@ def custom_dict_init():
             x = line_re.match(line.rstrip())
             if x:
                 x = x.groupdict()
-                a = Node(x['name'].decode('utf-8'),
+                a = Node(x['name'],
                          x['kind1'] or x['kind'] or '',
-                         self.vimencode(x['short1'] or x['short'] or ''),
+                         x['short1'] or x['short'] or '',
                          level=len(x['level'])/4)
                 return a
             elif line.startswith('+-*/'):
@@ -341,7 +366,7 @@ def custom_dict_init():
                 a = self._check_line(x)
                 if a:
                     if last:
-                        last.info = self.vimencode(last.info)
+                        last.info = last.info
                         yield last
                     last = a
                 else:
@@ -349,7 +374,7 @@ def custom_dict_init():
                         last.info += x
                     elif x.strip():
                         raise Custom_Error('wrong file: error line :'+x)
-            last.info = self.vimencode(last.info)
+            last.info = last.info
             yield last
 
         def addfile(self, filename):
@@ -357,8 +382,7 @@ def custom_dict_init():
             for x in self._readfile(filename):
                 l = x.level-stack[-1].level
                 if l <= 1:
-                    stack[l-2].childs.append(x)
-                    x.father = stack[l-2]
+                    stack[l-2].add(x, True)
                     stack = stack[:len(stack)+l-1]+[x]
                 else:
                     raise Custom_Error('wrong file: error level :'+filename)
@@ -373,6 +397,7 @@ def custom_dict_init():
                         a.add(x.word)
                         checktree(x)
                 root.childs.sort(key=self.tree_sort())
+                if len(root.childs) == 1: root.add(Node('______','_'))
             checktree(self.nodetree)
 
         @staticmethod
@@ -398,7 +423,7 @@ def custom_dict_init():
                 key = '%02d' % x.word.index(base) if base in x.word else '99'
                 key += '%02d' % x.word.lower().index(
                     base.lower()) if base.lower() in x.word.lower() else '99'
-                key += x.sortkey
+                key += x.word.swapcase()
                 return key
             return sortkey
 
@@ -422,17 +447,38 @@ def custom_dict_init():
     return Complete.getlocal, setup
 
 import sys
-if sys.version_info[0]<2 or sys.version_info[1]<7:
+import vim
+if sys.version_info[0] < 2 or sys.version_info[1] < 7:
     print 'custom dict plugin requires python2.7'
+    vim.command('let s:finished=1')
 else:
     custom_dict_load, custom_dict_setup = custom_dict_init()
+    vim.command('let s:finished=0')
 
 EOF
 
-autocmd! FileType * python custom_dict_setup()
 augroup filetypedetect
     au! BufNewFile,BufRead *.dict setfiletype dict
 augroup END
+
+if s:finished
+    finish
+endif
+
+set completeopt=menu,longest,preview   
+autocmd! FileType * python custom_dict_setup()
+
+if !exists('g:custom_dict_autoclose_preview')
+    let g:custom_dict_autoclose_preview=0
+endif
+au InsertLeave * if !pumvisible() && g:custom_dict_autoclose_preview | silent! pclose | endif
+
+if !exists('g:custom_dict_pumheight')
+    let g:custom_dict_pumheight = 20
+endif
+if str2nr(g:custom_dict_pumheight)>0
+    let &pumheight=str2nr(g:custom_dict_pumheight)
+endif
 
 function! g:Custom_dict_complete_func(findstart,base) "{{{
     if a:findstart
