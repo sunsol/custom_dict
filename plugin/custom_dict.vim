@@ -37,7 +37,7 @@ def custom_dict_init():
         return ','.join((func(x) for x in result))
 
     class Node(object):
-        def __init__(self, word, kind, menu=u'', level=0, info=u''):
+        def __init__(self, word, kind, menu='', level=0, info=''):
             self.level = level
             self.word = word
             self.kind = kind
